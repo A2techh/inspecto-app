@@ -1,0 +1,8 @@
+[Unit]
+Description=ptz proxy server service
+After=network.target robot_bringup.service
+[Service]
+ExecStartPre=/usr/bin/sleep 10
+ExecStart=/usr/local/bin/node /home/inspecto/dist/proxy.bundle.js
+[Install]
+WantedBy=multi-user.target
