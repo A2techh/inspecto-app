@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import * as ROSLIB from "roslib";
 import { Joystick } from "react-joystick-component";
-import { AiOutlineArrowUp, AiOutlineArrowDown } from "react-icons/ai";
-import { BsJoystick } from "react-icons/bs";
+import {
+	AiOutlineArrowUp, AiOutlineArrowDown, AiOutlineArrowLeft,
+	AiOutlineArrowRight, AiOutlineZoomIn, AiOutlineZoomOut, AiOutlineCloseCircle
+} from "react-icons/ai";
+import { PiArrowsClockwiseBold } from "react-icons/pi";
+import { BsJoystick, BsFillKeyboardFill } from "react-icons/bs";
 import logo from "./assets/a2tech.png";
 import Draggable from "react-draggable";
 // import { RiDragMoveFill } from "react-icons/ri";
@@ -10,7 +14,10 @@ import { saveAs } from "file-saver";
 import { Button, Alert, Modal } from "react-daisyui";
 import { GoAlert } from "react-icons/go";
 
-// import "joypad.js";
+
+import Odometer from 'react-odometerjs';
+
+import './App.css';
 const maxLinear = 0.25;
 const maxAngular = 1.5;
 let twist = new ROSLIB.Message({
@@ -32,14 +39,15 @@ let arrowUp = false;
 let arrowDown = false;
 let arrowLeft = false;
 let arrowRight = false;
-
-let videoStream = null;
 let mediaRecorder = null;
-let chunks = [];
+
+
 function App() {
 	const [intervalId, setIntervalId] = useState(0);
 	const [gamepadState, setGamepadState] = useState(false);
 	const [showJoystick, setShowJoystick] = useState(false);
+	const [showShortcuts, setShowShortcuts] = useState(false);
+	const [showPtzCtrl, setShowPtzCtrl] = useState(false);
 
 	const [connected, setConnected] = useState(false);
 	const [temperature, setTemperature] = useState(0.0);
@@ -55,244 +63,33 @@ function App() {
 	const temperatureSub = useRef(null);
 	const edgeFrontSub = useRef(null);
 	const edgeRearSub = useRef(null);
-
-	const [internalTemp, setInternalTemp] = useState(32.4);
+	const odometerSub = useRef(null);
+	const odometerResetPub = useRef(null);
 
 	const brushState = useRef(false);
 
 	const [cam, setCam] = useState(1);
 	const [url, setUrl] = useState("");
 
-	const canvasRef = useRef();
+	const canvasRef = useRef(null);
+	const playerRef = useRef();
+	const ptzCanvasRef = useRef(null);
 
 	const [isRecording, setIsRecording] = useState(false);
 
 	const [modalVisible, setModalVisible] = useState(false);
 
-	// const ros = new ROSLIB.Ros({ url: "ws://localhost:9090" });
-	// const ros = useMemo(() => new ROSLIB.Ros({ url: "ws://localhost:9090" }), []); //connect to websocket server
-
-	// useEffect(() => {
-	// 	const intervalId = setInterval(() => {
-	// 		if (arrowUp || arrowDown || arrowLeft || arrowRight) {
-	// 			console.log("move");
-	// 			arrowMove = true;
-	// 			let joyTwist = new ROSLIB.Message({
-	// 				linear: {
-	// 					x: 0.0,
-	// 					y: 0.0,
-	// 					z: 0.0,
-	// 				},
-	// 				angular: {
-	// 					x: 0.0,
-	// 					y: 0.0,
-	// 					z: 0.0,
-	// 				},
-	// 			});
-
-	// 			if (arrowUp) {
-	// 				if (arrowLeft) {
-	// 					joyTwist = new ROSLIB.Message({
-	// 						linear: {
-	// 							x: maxLinear,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 						angular: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: maxAngular,
-	// 						},
-	// 					});
-	// 				} else if (arrowRight) {
-	// 					joyTwist = new ROSLIB.Message({
-	// 						linear: {
-	// 							x: maxLinear,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 						angular: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: -maxAngular,
-	// 						},
-	// 					});
-	// 				} else if (arrowDown) {
-	// 					joyTwist = new ROSLIB.Message({
-	// 						linear: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 						angular: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 					});
-	// 				} else {
-	// 					joyTwist = new ROSLIB.Message({
-	// 						linear: {
-	// 							x: maxLinear,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 						angular: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 					});
-	// 				}
-	// 			} else if (arrowDown) {
-	// 				if (arrowLeft) {
-	// 					joyTwist = new ROSLIB.Message({
-	// 						linear: {
-	// 							x: -maxLinear,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 						angular: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: -maxAngular,
-	// 						},
-	// 					});
-	// 				} else if (arrowRight) {
-	// 					joyTwist = new ROSLIB.Message({
-	// 						linear: {
-	// 							x: -maxLinear,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 						angular: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: maxAngular,
-	// 						},
-	// 					});
-	// 				} else {
-	// 					joyTwist = new ROSLIB.Message({
-	// 						linear: {
-	// 							x: -maxLinear,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 						angular: {
-	// 							x: 0.0,
-	// 							y: 0.0,
-	// 							z: 0.0,
-	// 						},
-	// 					});
-	// 				}
-	// 			} else if (arrowLeft) {
-	// 				joyTwist = new ROSLIB.Message({
-	// 					linear: {
-	// 						x: 0.0,
-	// 						y: 0.0,
-	// 						z: 0.0,
-	// 					},
-	// 					angular: {
-	// 						x: 0.0,
-	// 						y: 0.0,
-	// 						z: maxAngular,
-	// 					},
-	// 				});
-	// 			} else if (arrowRight) {
-	// 				joyTwist = new ROSLIB.Message({
-	// 					linear: {
-	// 						x: 0.0,
-	// 						y: 0.0,
-	// 						z: 0.0,
-	// 					},
-	// 					angular: {
-	// 						x: 0.0,
-	// 						y: 0.0,
-	// 						z: -maxAngular,
-	// 					},
-	// 				});
-	// 			}
-	// 			cmdVelPub.current.publish(joyTwist);
-	// 		} else if (arrowMove) {
-	// 			arrowMove = false;
-	// 			console.log("stop");
-	// 			const joyTwist = new ROSLIB.Message({
-	// 				linear: {
-	// 					x: 0.0,
-	// 					y: 0.0,
-	// 					z: 0.0,
-	// 				},
-	// 				angular: {
-	// 					x: 0.0,
-	// 					y: 0.0,
-	// 					z: 0.0,
-	// 				},
-	// 			});
-	// 			cmdVelPub.current.publish(joyTwist);
-	// 		}
-	// 	}, 50);
-
-	// 	return () => clearInterval(intervalId);
-	// }, []);
-
-	// console.log("modal visible", modalVisible);
+	const [odometerValue, setOdometerValue] = useState(0.00);
+	const [airSpeedValue, setAirSpeedValue] = useState(0.00);
+	const [areaValue, setAreaValue] = useState(0.00);
+	const [flowRateValue, setFlowRateValue] = useState(0.00);
 
 	useEffect(() => {
-		videoStream = canvasRef.current.captureStream(30);
-		mediaRecorder = new MediaRecorder(videoStream, {
-			videoBitsPerSecond: 5000000,
-			mimeType: "video/webm;codecs=vp9",
-		});
 
-		mediaRecorder.ondataavailable = (e) => {
-			chunks.push(e.data);
-		};
-		mediaRecorder.onstop = function (e) {
-			const blob = new Blob(chunks, { type: "video/mp4" });
-			chunks = [];
-			console.log(blob);
-			// var videoURL = URL.createObjectURL(blob);
-			// video.src = videoURL;
-			saveAs(blob, "video.mp4");
-		};
-
-		return () => {};
-	}, []);
-
-	useEffect(() => {
 		const context = canvasRef.current.getContext("2d");
 		const image = new Image();
 		image.crossOrigin = "anonymous";
 		image.src = url;
-
-		// const animate = () => {
-		// 	const date = new Date();
-		// 	const text = date.toLocaleTimeString();
-		// 	const cw = canvasRef.current.width;
-		// 	const ch = canvasRef.current.height;
-		// 	context.drawImage(image, 0, 0, 1280, 720);
-		// 	context.font = "30px Georgia";
-		// 	const textWidth = context.measureText(text).width;
-		// 	context.globalAlpha = 1.0;
-		// 	context.fillStyle = "black";
-		// 	context.fillText(text, cw - textWidth - 10, ch - 20);
-		// 	if (cam === 1) {
-		// 		const text = "Top Camera";
-		// 		const textWidth = context.measureText(text).width;
-		// 		context.fillText(text, cw - textWidth - 10, 30);
-		// 	} else if (cam === 2) {
-		// 		const text = "Front Camera";
-		// 		const textWidth = context.measureText(text).width;
-		// 		context.fillText(text, cw - textWidth - 10, 30);
-		// 	} else if (cam === 3) {
-		// 		const text = "Rear Camera";
-		// 		const textWidth = context.measureText(text).width;
-		// 		context.fillText(text, cw - textWidth - 10, 30);
-		// 	}
-		// 	requestAnimationFrame(animate);
-		// };
-
-		// requestAnimationFrame(animate);
 
 		const canvasInterval = setInterval(() => {
 			const date = new Date();
@@ -300,6 +97,7 @@ function App() {
 			const cw = canvasRef.current.width;
 			const ch = canvasRef.current.height;
 			context.drawImage(image, 0, 0, 1280, 720);
+
 			context.font = "30px Georgia";
 			const textWidth = context.measureText(text).width;
 			context.globalAlpha = 1.0;
@@ -552,6 +350,7 @@ function App() {
 		}
 		// ros.current = new ROSLIB.Ros({ url: "ws://192.168.0.188:8080" });
 		ros.current = new ROSLIB.Ros({ url: "ws://192.168.88.2:8080" });
+		// ros.current = new ROSLIB.Ros({ url: "ws://localhost:9090" });
 		ros.current.on("error", function (error) {
 			console.log(error);
 			setConnected(false);
@@ -574,17 +373,19 @@ function App() {
 		});
 
 		window.addEventListener("keydown", (evt) => {
-			// console.log(evt.code);
+			console.log(evt.code);
 			if (evt.code === "Digit1") {
 				setCam(1);
 			} else if (evt.code === "Digit2") {
 				setCam(2);
 			} else if (evt.code === "Digit3") {
-				setCam(3);
-			} else if (evt.code === "KeyW") {
+				setCam(3);	
+			} else if (evt.code === "Digit4") {
+				setCam(4);
+			} else if (evt.code === "KeyF") {
 				console.log("brush up");
 				handleBrushArm("up");
-			} else if (evt.code === "KeyS") {
+			} else if (evt.code === "KeyV") {
 				console.log("brush down");
 				handleBrushArm("down");
 			} else if (evt.code === "KeyQ") {
@@ -600,14 +401,17 @@ function App() {
 				arrowLeft = true;
 			} else if (evt.code === "ArrowRight") {
 				arrowRight = true;
+			} else if (evt.code === "KeyR" && evt.shiftKey) {
+				console.log("Reset")
+				const confirmed = window.confirm("Are you sure you want to reset the odometer?");
+				if (confirmed) {
+					odometerResetPub.current.publish({});
+				}
 			}
 		});
 
 		window.addEventListener("keyup", (evt) => {
-			if (evt.code === "KeyW") {
-				console.log("brush stop");
-				handleBrushArm("stop");
-			} else if (evt.code === "KeyS") {
+			if (evt.code === "KeyF" || evt.code === "KeyV") {
 				console.log("brush stop");
 				handleBrushArm("stop");
 			} else if (evt.code === "ArrowUp") {
@@ -693,6 +497,23 @@ function App() {
 		edgeRearSub.current.subscribe((msg) => {
 			setEdgeRear(msg.data);
 		});
+
+		// subscribe odometer
+		odometerSub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/odometer",
+			messageType: "std_msgs/Float64",
+		});
+
+		odometerSub.current.subscribe((msg) => {
+			setOdometerValue(msg.data);
+		});
+
+		odometerResetPub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/odometer_reset",
+			messageType: "std_msgs/Empty",
+		});
 	}, [connected]);
 
 	useEffect(() => {
@@ -702,6 +523,7 @@ function App() {
 			setModalVisible(false);
 		}
 	}, [edgeFront]);
+
 	useEffect(() => {
 		if (!edgeRear) {
 			setModalVisible(true);
@@ -807,7 +629,7 @@ function App() {
 			}}
 		>
 			<div className="flex flex-col w-full h-full">
-				<div className="flex bg-slate-500 w-full h-12 justify-between px-3">
+				<div className="flex bg-slate-500 w-full h-14 justify-between px-3">
 					<div className="flex h-full w-full items-center gap-10">
 						<div className="h-full">
 							<img className="object-scale-down h-full" src={logo}></img>
@@ -833,8 +655,15 @@ function App() {
 							</div>
 						</div>
 					</div>
-					<div></div>
 					<div className="flex h-full items-center gap-2">
+						<button
+							className="btn tooltip tooltip-left"
+							data-tip="show keyboard shortcuts"
+							onClick={() => setShowShortcuts(true)}
+						>
+							<BsFillKeyboardFill color="white" size={30}></BsFillKeyboardFill>
+						</button>
+
 						<button
 							className="btn tooltip tooltip-left"
 							data-tip="show joystick"
@@ -847,9 +676,26 @@ function App() {
 					</div>
 				</div>
 
-				<div className="flex flex-col w-full h-[90%] items-center justify-center gap-4">
-					{/* <img className="object-contain h-[85%]" src={url}></img> */}
-					<canvas className="object-contain h-[90%]" ref={canvasRef} width={1280} height={720}></canvas>
+				<div className="flex flex-col w-full h-[85%] items-center justify-center">
+					<div style={{ position: 'relative', width: '1280px', height: '720px' }}>
+						{/* Canvas for 2D context */}
+						<canvas
+							className={`object-contain h-[98%] ${cam === 4 || cam == 5 ? 'hidden' : ''}`}
+							ref={canvasRef}
+							width={1280}
+							height={720}
+							style={{ position: 'absolute', top: 0, left: 0 }}
+						></canvas>
+
+						{/* Canvas for WebGL context */}
+						<canvas
+							className={`object-contain h-[98%] ${cam === 4 ? '' : 'hidden'}`}
+							ref={ptzCanvasRef}
+							width={1280}
+							height={720}
+							style={{ position: 'absolute', top: 0, left: 0 }}
+						></canvas>
+					</div>
 					<div className="flex justify-between gap-40">
 						<div className="flex justify-center gap-2">
 							<button
@@ -896,29 +742,15 @@ function App() {
 								{!isRecording && "Record"}
 								{isRecording && "Stop"}
 							</Button>
+
 						</div>
 					</div>
 				</div>
-
-				<div className="flex flex-col w-full h-[10%] items-center justify-center invisible md:visible">
-					<div
-						className="bg-white rounded-sm  shadow-xl p-4 opacity-30 hover:opacity-100 tooltip tooltip-top"
-						data-tip={"Keyboard Shortcut"}
-					>
-						<div className="flex justify-center">
-							<h2 className="text-black font-extrabold ">SHORTCUT KEY</h2>
-						</div>
-						<div className="flex items-start gap-10">
-							<div className="flex gap-2">
-								<h3 className="text-black font-semibold ">{"BRUSH SPIN:"}</h3>
-								<h3 className="text-black font-normal ">{"ON/OFF : Q"}</h3>
-							</div>
-
-							<div className="flex gap-2">
-								<h3 className="text-black font-semibold ">{"BRUSH UP/DOWN:"}</h3>
-								<h3 className="text-black font-normal  ">{"UP : W"}</h3>
-								<h3 className="text-black font-normal  ">{"DOWN : S"}</h3>
-							</div>
+				<div className="flex flex-col w-full h-[5%] items-center justify-center invisible md:visible">
+					<div className="flex justify-center gap-60">
+						<div>
+							<h2 style={{ color: 'white', fontWeight: 'bold' }}>ODOMETER</h2>
+							<Odometer value={odometerValue} format="(,ddd).dd" duration="500" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
 						</div>
 					</div>
 				</div>
@@ -945,20 +777,20 @@ function App() {
 
 						<Draggable handle="strong">
 							<div className="absolute flex flex-col bg-slate-400 portrait:bottom-[1%] portrait:left-[10%] landscape:bottom-[7%] landscape:left-[3%] p-2 rounded-3xl">
-								<strong>
+								{/* <strong>
 									<div className="flex justify-center items-start hover:cursor-move text-black">Brush</div>
-								</strong>
+								</strong> */}
 								<div className="flex gap-2">
 									<div className="flex flex-col gap-2">
 										<button
 											// onClick={() => {
 											// 	console.log("clicked");
 											// }}
-											onTouchStart={() => {
+											onMouseDown={() => {
 												console.log("start");
 												handleBrushArm("up");
 											}}
-											onTouchEnd={() => {
+											onMouseUp={() => {
 												console.log("stop");
 												handleBrushArm("stop");
 											}}
@@ -966,11 +798,11 @@ function App() {
 											<AiOutlineArrowUp color="black" size={35} />
 										</button>
 										<button
-											onTouchStart={() => {
+											onMouseDown={() => {
 												// console.log("start");
 												handleBrushArm("down");
 											}}
-											onTouchEnd={() => {
+											onMouseUp={() => {
 												console.log("stop");
 												handleBrushArm("stop");
 											}}
@@ -978,7 +810,7 @@ function App() {
 											<AiOutlineArrowDown color="black" size={35} />
 										</button>
 									</div>
-									<div className="flex items-center">
+									<div className="flex items-center gap-2">
 										<button
 											className="btn text-white"
 											onClick={() => {
@@ -988,6 +820,14 @@ function App() {
 											}}
 										>
 											BRUSH
+										</button>
+										<button
+											onClick={() => {
+												console.log("start");
+												// handleBrushArm("down");
+											}}
+										>
+											<PiArrowsClockwiseBold color="black" size={35} />
 										</button>
 									</div>
 								</div>
@@ -1009,6 +849,54 @@ function App() {
 					</div>
 				</Modal.Body>
 			</Modal>
+
+			<Modal
+				open={showShortcuts}
+				onClickBackdrop={() => setShowShortcuts(false)}
+			>
+				<Modal.Body>
+					<div className="flex justify-center item-center">
+						<div className="post__content">
+							<table>
+								<thead>
+									<tr>
+										<th style={{ textAlign: 'center' }}>KEY</th>
+										<th style={{ textAlign: 'center' }}>ACTION</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr>
+										<td style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+											<div style={{ display: 'flex', gap: '4px' }}>
+												<kbd>▲</kbd>
+											</div>
+											<div style={{ display: 'flex', gap: '4px' }}>
+												<kbd>◄</kbd>
+												<kbd>▼</kbd>
+												<kbd>►</kbd>
+											</div>
+										</td>
+										<td>ROBOT MOVEMENT</td>
+									</tr>
+									<tr>
+										<td><kbd>Q</kbd></td>
+										<td>BRUSH: ON/OFF</td>
+									</tr>
+									<tr>
+										<td><kbd>F</kbd><kbd>V</kbd></td>
+										<td>BRUSH: UP/DOWN</td>
+									</tr>
+									<tr>
+										<td><kbd>Shift + R</kbd></td>
+										<td>RESET ODOMETER</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+					</div>
+				</Modal.Body>
+			</Modal>
+
 		</div>
 	);
 }
