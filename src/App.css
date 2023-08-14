@@ -1,0 +1,40 @@
+.odometer {
+  font-size: 48px;
+}
+
+kbd {
+  padding: .1875rem .375rem;
+  margin: 0 0.15em;
+  font-size: .875em;
+  color: white;
+  background-color: black;
+  border-radius: .25rem;
+  font-style: bold;
+  font-weight: 600;
+}
+
+.post__content {
+  text-align:center;
+  word-break:break-word;
+  color: solid black;
+  font-size: 26px;
+ }
+
+ .post__content table {
+  display:block;
+  overflow:auto;
+  /* margin-bottom:16px */
+ }
+
+ .post__content table th {
+  font-weight:900;
+ }
+ .post__content table td,
+ .post__content table th {
+  padding:6px 13px;
+  border:1px solid black
+ }
+ .post__content table tr {
+  background-color: solid black;
+  border-top:1px solid black
+ }
