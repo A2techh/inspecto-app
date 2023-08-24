@@ -38,3 +38,19 @@ kbd {
   background-color: solid black;
   border-top:1px solid black
  }
+
+ .red-input {
+  background-color: rgb(226, 57, 91);
+}
+
+.default-input {
+  border: 2px solid black;
+}
+
+.animated svg {
+  transition: transform 0.5s ease-in-out;
+}
+
+.active svg{
+  transform: scale(1.2); /* Adjust the scale factor as needed */
+}

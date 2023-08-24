@@ -6,7 +6,11 @@ import {
 	AiOutlineArrowRight, AiOutlineZoomIn, AiOutlineZoomOut, AiOutlineCloseCircle
 } from "react-icons/ai";
 import { PiArrowsClockwiseBold } from "react-icons/pi";
-import { BsJoystick, BsFillKeyboardFill } from "react-icons/bs";
+import { BsJoystick, BsFillKeyboardFill, BsRocketTakeoff } from "react-icons/bs";
+import { GiVintageRobot } from "react-icons/gi";
+import { BiReset } from "react-icons/bi";
+import {MdOutlineLockReset} from "react-icons/md";
+// import { GiRocketThruster } from "react-icons/gi";
 import logo from "./assets/a2tech.png";
 import Draggable from "react-draggable";
 // import { RiDragMoveFill } from "react-icons/ri";
@@ -18,6 +22,8 @@ import { GoAlert } from "react-icons/go";
 import Odometer from 'react-odometerjs';
 import axios from 'axios';
 import './App.css';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ScatterChart, Scatter, ZAxis } from 'recharts';
+import { data, data1, data2, data3, data4, data5, data6, data7, data8, data9, data10 } from "./scatterPoints"
 
 const maxLinear = 0.25;
 const maxAngular = 1.5;
@@ -49,6 +55,10 @@ function App() {
 	const [showJoystick, setShowJoystick] = useState(false);
 	const [showShortcuts, setShowShortcuts] = useState(false);
 	const [showPtzCtrl, setShowPtzCtrl] = useState(false);
+	const [showAuto, setShowAuto] = useState(false);
+	const [autoStart, setAutoStart] = useState(false);
+	const [startPlot, setStartPlot] = useState(false);
+
 
 	const [connected, setConnected] = useState(false);
 	const [temperature, setTemperature] = useState(0.0);
@@ -68,10 +78,16 @@ function App() {
 	const areaSub = useRef(null);
 	const flowRateSub = useRef(null);
 	const odometerResetPub = useRef(null);
+	const startAutoPub = useRef(null);
+	const stopAutoPub = useRef(null);
+	const diameterSub = useRef(null);
+	const moveDistancePub = useRef(null);
+	const odomSub = useRef(null);
+	const resetOdomPub = useRef(null);
 
 	const brushState = useRef(false);
 
-	const [cam, setCam] = useState(4);
+	const [cam, setCam] = useState(1);
 	const [url, setUrl] = useState("");
 
 	const canvasRef = useRef(null);
@@ -86,6 +102,113 @@ function App() {
 	const [airSpeedValue, setAirSpeedValue] = useState(0.00);
 	const [areaValue, setAreaValue] = useState(0.00);
 	const [flowRateValue, setFlowRateValue] = useState(0.00);
+
+	const [inputValue, setInputValue] = useState('');
+	const [inputDiameter, setInputDiameter] = useState('');
+	const [inputTol, setInputTol] = useState('');
+	const inputValueRef = useRef(null);
+	const inputDiameterRef = useRef(null);
+	const inputTolRef = useRef(null);
+
+	const handleInputChange = (event) => {
+		const input = event.target.value;
+		const sanitizedValue = input.replace(/[^0-9.-]/g, '');
+		setInputValue(sanitizedValue);
+	};
+	const handleInputDiameterChange = (event) => {
+		const input = event.target.value;
+		const sanitizedValue = input.replace(/[^0-9.]/g, '');
+		setInputDiameter(sanitizedValue);
+	};
+	const handleInputTolChange = (event) => {
+		const input = event.target.value;
+		const sanitizedValue = input.replace(/[^0-9.]/g, '');
+		setInputTol(sanitizedValue);
+	};
+
+	const chartContainerRef = useRef(null);
+	const [realtimeData, setRealtimeData] = useState([]);
+	const [chartWidth, setChartWidth] = useState(1350);
+
+	// useEffect(() => {
+	// 	if (!startPlot) {
+	// 		return;
+	// 	}
+	// 	const interval = setInterval(() => {
+	// 		const newDataPoint = {
+	// 			time: new Date().toLocaleTimeString(),
+	// 			value: Math.random() * 100,
+	// 			expected: parseFloat(inputDiameter)
+	// 		};
+
+	// 		setRealtimeData(prevData => [...prevData, newDataPoint]);
+	// 		setChartWidth(Math.max(1350, (realtimeData.length) * 120));
+	// 		if (chartContainerRef.current) {
+	// 			chartContainerRef.current.scrollLeft = chartContainerRef.current.scrollWidth;
+	// 		}
+
+	// 	}, 1000);
+
+	// 	return () => clearInterval(interval);
+	// }, [startPlot]);
+	useEffect(() => {
+		let prevX = null; // Initialize the previous x value
+		let counter = 0;
+		console.log("useEffect, ", startPlot);
+		if (startPlot) {
+			diameterSub.current.subscribe((msg) => {
+				// console.log("diameter", msg);
+				const currentX = msg.field_of_view;
+				console.log("prev: ", prevX, " current: ", currentX, " counter: ", counter);
+				if (prevX === null || currentX - prevX >= 0.02) {
+					const newDataPoint = {
+						x: currentX.toFixed(3),
+						diameter: msg.min_range.toFixed(3),
+						expected: parseFloat(inputDiameter)
+					};
+					setRealtimeData(prevData => [...prevData, newDataPoint]);
+					setChartWidth(Math.max(1350, (realtimeData.length) * 120));
+					if (chartContainerRef.current) {
+						chartContainerRef.current.scrollLeft = chartContainerRef.current.scrollWidth;
+					}
+					console.log("new point", currentX);
+					prevX = currentX;
+					counter = 0;
+				} else {
+					counter = counter + 1;
+				}
+				if (counter >= 50) {//counter may vary depends on the speed of moving, now when moving, the counter can reach 11
+					setAutoStart(false);
+					setStartPlot(false);
+					setInputValue('');
+					setInputDiameter('');
+					setInputTol('');
+				}
+			});
+		}
+		return () => {
+			if (diameterSub.current) {
+				diameterSub.current.unsubscribe();
+			}
+			counter = 0;
+			prevX = null;
+		};
+	}, [startPlot])
+
+	useEffect(()=>{
+		if(autoStart){
+			const autoInterval = setInterval(()=>{
+				setAutoStart(false);
+				setStartPlot(false);
+				setInputValue('');
+				setInputDiameter('');
+				setInputTol('');
+			}, 500);
+			return()=>{
+				clearInterval(autoInterval)
+			};
+		}
+	},[autoStart, airSpeedValue])
 
 	const playchrome = () => {
 		// Your implementation for the playchrome function
@@ -146,40 +269,30 @@ function App() {
 			const cw = canvasRef.current.width;
 			const ch = canvasRef.current.height;
 			if (cam != 4) {
-				context.drawImage(image, 0, 0, 1280, 720);
-				// setPlayChromeCalled(false);
-			} else {
-				// if(!playChromeCalled){
-				// 	playchrome();
-				// 	setPlayChromeCalled(true);
-				// }
-				console.log("draw frame");
+				if (!showAuto) {
+					context.drawImage(image, 0, 0, 1280, 720);
+					context.font = "30px Georgia";
+					const textWidth = context.measureText(text).width;
+					context.globalAlpha = 1.0;
+					context.fillStyle = "black";
+					context.fillText(text, cw - textWidth - 10, ch - 20);
+					if (cam === 1) {
+						const text = "Top Camera";
+						const textWidth = context.measureText(text).width;
+						context.fillText(text, cw - textWidth - 10, 30);
+					} else if (cam === 2) {
+						const text = "Front Camera";
+						const textWidth = context.measureText(text).width;
+						context.fillText(text, cw - textWidth - 10, 30);
+					} else if (cam === 3) {
+						const text = "Rear Camera";
+						const textWidth = context.measureText(text).width;
+						context.fillText(text, cw - textWidth - 10, 30);
+					}
+				} else {
+					context.drawImage(image, 0, 0, 680, 420);
+				}
 			}
-
-			context.font = "30px Georgia";
-			const textWidth = context.measureText(text).width;
-			context.globalAlpha = 1.0;
-			context.fillStyle = "black";
-			context.fillText(text, cw - textWidth - 10, ch - 20);
-			if (cam === 1) {
-				const text = "Top Camera";
-				const textWidth = context.measureText(text).width;
-				context.fillText(text, cw - textWidth - 10, 30);
-			} else if (cam === 2) {
-				const text = "Front Camera";
-				const textWidth = context.measureText(text).width;
-				context.fillText(text, cw - textWidth - 10, 30);
-			} else if (cam === 3) {
-				const text = "Rear Camera";
-				const textWidth = context.measureText(text).width;
-				context.fillText(text, cw - textWidth - 10, 30);
-			}
-			// else if (cam === 4) {
-			// 	const text = "PTZ";
-			// 	const textWidth = context.measureText(text).width;
-			// 	context.fillText(text, cw - textWidth - 10, 30);
-			// }
-
 		}, 34);
 		return () => {
 			clearInterval(canvasInterval);
@@ -412,7 +525,7 @@ function App() {
 		if (ros.current) {
 			return;
 		}
-		// ros.current = new ROSLIB.Ros({ url: "ws://192.168.0.188:8080" });
+		// ros.current = new ROSLIB.Ros({ url: "ws://192.168.0.141:9090" });
 		ros.current = new ROSLIB.Ros({ url: "ws://192.168.88.2:8080" });
 		// ros.current = new ROSLIB.Ros({ url: "ws://localhost:9090" });
 		ros.current.on("error", function (error) {
@@ -437,6 +550,10 @@ function App() {
 		});
 
 		window.addEventListener("keydown", (evt) => {
+			if (document.activeElement.tagName === 'INPUT') {
+				return; // Do nothing if an input element has focus
+			}
+
 			console.log(evt.code);
 			if (evt.code === "Digit1") {
 				setCam(1);
@@ -624,30 +741,64 @@ function App() {
 			name: "/odometer_reset",
 			messageType: "std_msgs/Empty",
 		});
-
+		startAutoPub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/start_auto",
+			messageType: "std_msgs/Empty",
+		});
+		stopAutoPub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/stop_auto",
+			messageType: "std_msgs/Empty",
+		});
+		resetOdomPub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/reset_odom",
+			messageType: "std_msgs/Empty",
+		});
+		moveDistancePub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/move_distance",
+			messageType: "std_msgs/Float32",
+		});
+		diameterSub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/range_info",
+			messageType: "sensor_msgs/Range",
+		});
+		odomSub.current = new ROSLIB.Topic({
+			ros: ros.current,
+			name: "/odom",
+			messageType: "nav_msgs/Odometry",
+		});
+		odomSub.current.subscribe((msg) => {
+			// console.log(msg);
+			setAirSpeedValue(msg.pose.pose.position.x);
+		})
 	}, [connected]);
 
-	useEffect(() => {
-		if (!edgeFront) {
-			setModalVisible(true);
-		} else {
-			setModalVisible(false);
-		}
-	}, [edgeFront]);
+	// useEffect(() => {
+	// 	if (!edgeFront) {
+	// 		setModalVisible(true);
+	// 	} else {
+	// 		setModalVisible(false);
+	// 	}
+	// }, [edgeFront]);
 
-	useEffect(() => {
-		if (!edgeRear) {
-			setModalVisible(true);
-		} else {
-			setModalVisible(false);
-		}
-	}, [edgeRear]);
+	// useEffect(() => {
+	// 	if (!edgeRear) {
+	// 		setModalVisible(true);
+	// 	} else {
+	// 		setModalVisible(false);
+	// 	}
+	// }, [edgeRear]);
 
 	useEffect(() => {
 		// console.log(canvas);
 		if (cam == 1) {
 			// stopchrome();
 			setUrl("http://192.168.88.2:8081/stream");
+			// setUrl("http://192.168.0.141:8081/stream");
 		} else if (cam == 2) {
 			// stopchrome();
 			setUrl("http://192.168.88.2:8082/stream");
@@ -657,8 +808,14 @@ function App() {
 		} else if (cam == 4) {
 			playchrome();
 			setUrl("");
+		} else if (cam == 5) {
+			setUrl("");
 		}
 	}, [cam]);
+
+	useEffect(() => {
+		setCam(3);
+	}, [showAuto])
 
 	const handleMove = (evt) => {
 		// console.log(evt.y);
@@ -746,6 +903,51 @@ function App() {
 		console.log("saving image");
 	};
 
+	const handleAuto = () => {
+		if (autoStart) {
+			setAutoStart(false);
+			setStartPlot(false);
+			setInputValue('');
+			setInputDiameter('');
+			setInputTol('');
+			stopAutoPub.current.publish({});
+		} else {
+			if (inputValue == '') {
+				inputValueRef.current.focus();
+				inputValueRef.current.classList.add('red-input');
+				setTimeout(() => {
+					inputValueRef.current.classList.remove('red-input');
+				}, 300);
+				return;
+			}
+			if (inputDiameter == '') {
+				inputDiameterRef.current.focus();
+				inputDiameterRef.current.classList.add('red-input');
+				setTimeout(() => {
+					inputDiameterRef.current.classList.remove('red-input');
+				}, 300);
+				return;
+			}
+			if (inputTol == '') {
+				inputTolRef.current.focus();
+				inputTolRef.current.classList.add('red-input');
+				setTimeout(() => {
+					inputTolRef.current.classList.remove('red-input');
+				}, 300);
+				return;
+			}
+			setCam(3);
+			// resetOdomPub.current.publish({});
+			if (realtimeData.length) {
+				setRealtimeData([]);
+			}
+			moveDistancePub.current.publish({ data: parseFloat(inputValue) });
+			setAutoStart(true);
+			setStartPlot(true);
+		}
+
+	};
+
 	return (
 		<div
 			className="w-screen h-screen bg-slate-800 overflow-hidden"
@@ -783,6 +985,14 @@ function App() {
 					<div className="flex h-full items-center gap-2">
 						<button
 							className="btn tooltip tooltip-left"
+							data-tip="auto mode"
+							onClick={() => { setShowAuto(!showAuto); setCam(5); }}
+						>
+							<GiVintageRobot color="white" size={30}></GiVintageRobot>
+						</button>
+
+						<button
+							className="btn tooltip tooltip-left"
 							data-tip="show keyboard shortcuts"
 							onClick={() => setShowShortcuts(true)}
 						>
@@ -801,108 +1011,355 @@ function App() {
 					</div>
 				</div>
 
-				<div className="flex flex-col w-full h-[85%] items-center justify-center">
-					<div style={{ position: 'relative', width: '1280px', height: '720px' }}>
-						{/* Canvas for 2D context */}
-						<canvas
-							className={`object-contain h-[98%] ${cam === 4 || cam == 5 ? 'hidden' : ''}`}
-							ref={canvasRef}
-							width={1280}
-							height={720}
-							style={{ position: 'absolute', top: 0, left: 0 }}
-						></canvas>
+				{!showAuto ? (
+					<>
+						<div className="flex flex-col w-full h-[85%] items-center justify-center">
+							<div style={{ position: 'relative', width: '1280px', height: '720px' }}>
+								{/* Canvas for 2D context */}
+								<canvas
+									className={`object-contain h-[98%] ${cam === 4 || cam == 5 ? 'hidden' : ''}`}
+									ref={canvasRef}
+									width={1280}
+									height={720}
+									style={{ position: 'absolute', top: 0, left: 0 }}
+								></canvas>
 
-						{/* Canvas for WebGL context */}
-						<canvas
-							className={`object-contain h-[98%] ${cam === 4 ? '' : 'hidden'}`}
-							ref={ptzCanvasRef}
-							width={1280}
-							height={720}
-							style={{ position: 'absolute', top: 0, left: 0 }}
-						></canvas>
-					</div>
-					<div className="flex justify-between gap-40">
-						<div className="flex justify-center gap-2">
-							<button
-								className="btn"
-								onClick={() => {
-									setCam(1);
-									setShowPtzCtrl(false);
-								}}
-							>
-								{"Cam 1 (1)"}
-							</button>
-							<button
-								className="btn"
-								onClick={() => {
-									setCam(2);
-									setShowPtzCtrl(false);
-								}}
-							>
-								{"Cam 2 (2)"}
-							</button>
-							<button
-								className="btn"
-								onClick={() => {
-									setCam(3);
-									setShowPtzCtrl(false);
-								}}
-							>
-								{"Cam 3 (3)"}
-							</button>
-							<button
-								className="btn"
-								onClick={() => {
-									setCam(4);
-									setShowPtzCtrl(true);
-								}}
-							>
-								{"PTZ (4)"}
-							</button>
-						</div>
-						<div className="flex justify-center gap-2">
-							<button className="btn" onClick={downloadImage}>
-								{"Snapshot"}
-							</button>
-							<Button
-								color={isRecording ? "error" : ""}
-								onClick={() => {
-									if (!isRecording) {
-										setIsRecording(true);
-										mediaRecorder.start();
-									} else {
-										setIsRecording(false);
-										mediaRecorder.stop();
-									}
-								}}
-							>
-								{!isRecording && "Record"}
-								{isRecording && "Stop"}
-							</Button>
+								{/* Canvas for WebGL context */}
+								<canvas
+									className={`object-contain h-[98%] ${cam === 4 ? '' : 'hidden'}`}
+									ref={ptzCanvasRef}
+									width={1280}
+									height={720}
+									style={{ position: 'absolute', top: 0, left: 0 }}
+								></canvas>
+								{/* iframe for webpage */}
+								<div style={{ width: "100%", height: "720px", overflow: "hidden", position: "relative" }}>
+									<iframe
+										className={`object-contain h-[98%] ${cam === 5 ? '' : 'hidden'}`}
+										// ref={iframeRef}
+										style={{ position: 'relative', top: "-43px", left: 0, width: '100%', height: '98%', border: 'none' }}
+										src="http://192.168.88.246:8090/?ds=rosbridge-websocket&ds.url=ws%3A%2F%2F192.168.88.2%3A8080"
+										// src="http://192.168.0.141:8090/?ds=rosbridge-websocket&ds.url=ws%3A%2F%2Flocalhost%3A9090&layoutId=cf454c6f-4944-4c11-b20d-629e1e3788c7"
+										title="Web Page"
+									></iframe>
+								</div>
+							</div>
+							<div className="flex justify-between gap-40">
+								<div className="flex justify-center gap-2">
+									<button
+										className="btn"
+										onClick={() => {
+											setCam(1);
+											setShowPtzCtrl(false);
+										}}
+									>
+										{"Cam 1 (1)"}
+									</button>
+									<button
+										className="btn"
+										onClick={() => {
+											setCam(2);
+											setShowPtzCtrl(false);
+										}}
+									>
+										{"Cam 2 (2)"}
+									</button>
+									<button
+										className="btn"
+										onClick={() => {
+											setCam(3);
+											setShowPtzCtrl(false);
+										}}
+									>
+										{"Cam 3 (3)"}
+									</button>
+									<button
+										className="btn"
+										onClick={() => {
+											setCam(4);
+											setShowPtzCtrl(true);
+										}}
+									>
+										{"PTZ (4)"}
+									</button>
+									<button
+										className="btn"
+										onClick={() => {
+											setCam(5);
+											setShowPtzCtrl(false);
+										}}
+									>
+										{"Mapping (5)"}
+									</button>
+								</div>
+								<div className="flex justify-center gap-2">
+									<button className="btn" onClick={downloadImage}>
+										{"Snapshot"}
+									</button>
+									<Button
+										color={isRecording ? "error" : ""}
+										onClick={() => {
+											if (!isRecording) {
+												setIsRecording(true);
+												mediaRecorder.start();
+											} else {
+												setIsRecording(false);
+												mediaRecorder.stop();
+											}
+										}}
+									>
+										{!isRecording && "Record"}
+										{isRecording && "Stop"}
+									</Button>
 
+								</div>
+							</div>
 						</div>
-					</div>
-				</div>
-				<div className="flex flex-col w-full h-[5%] items-center justify-center invisible md:visible">
-					<div className="flex justify-center gap-60">
-						<div>
-							<h2 style={{ color: 'white', fontWeight: 'bold' }}>ODOMETER</h2>
-							<Odometer value={odometerValue} format="(,ddd).dd" duration="500" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+						<div className="flex flex-col w-full h-[5%] items-center justify-center invisible md:visible">
+							<div className="flex justify-center gap-60">
+								<div>
+									<h2 style={{ color: 'white', fontWeight: 'bold' }}>ODOMETER</h2>
+									<Odometer value={odometerValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+								</div>
+								<div>
+									<h2 style={{ color: 'white', fontWeight: 'bold' }}>FORWARD DISTANCE</h2>
+									<Odometer value={airSpeedValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+								</div>
+								<div>
+									<h2 style={{ color: 'white', fontWeight: 'bold' }}>AREA</h2>
+									<Odometer value={areaValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+								</div>
+								<div>
+									<h2 style={{ color: 'white', fontWeight: 'bold' }}>FLOW RATE</h2>
+									<Odometer value={flowRateValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+								</div>
+							</div>
 						</div>
-						<div>
-							<h2 style={{ color: 'white', fontWeight: 'bold' }}>AIR SPEED</h2>
-							<Odometer value={airSpeedValue} format="(,ddd).dd" duration="500" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+					</>
+				) : (
+					<>
+						<div className="flex flex-col w-full h-[85%]">
+							<div className="flex gap-1">
+								<div style={{ position: 'relative', width: '1000px', height: '560px' }}>
+									{/* Canvas for 2D context */}
+									<canvas
+										className={`object-contain h-[98%] ${cam === 4 ? 'hidden' : ''}`}
+										ref={canvasRef}
+										width={1000}
+										height={480}
+										style={{ position: 'absolute', top: 0, left: 0 }}
+									></canvas>
+
+									{/* Canvas for WebGL context */}
+									<canvas
+										className={`object-contain h-[98%] ${cam === 4 ? '' : 'hidden'}`}
+										ref={ptzCanvasRef}
+										width={1280}
+										height={720}
+										style={{ position: 'absolute', top: 0, left: 0 }}
+									></canvas>
+									<div className="flex justify-between gap-40" style={{ position: 'absolute', bottom: '23px', left: '50%', transform: 'translateX(-50%)' }}>
+										<div className="flex justify-center gap-2">
+											<button
+												className="btn"
+												onClick={() => {
+													setCam(1);
+													setShowPtzCtrl(false);
+												}}
+											>
+												{"Cam 1 (1)"}
+											</button>
+											<button
+												className="btn"
+												onClick={() => {
+													setCam(2);
+													setShowPtzCtrl(false);
+												}}
+											>
+												{"Cam 2 (2)"}
+											</button>
+											<button
+												className="btn"
+												onClick={() => {
+													setCam(3);
+													setShowPtzCtrl(false);
+												}}
+											>
+												{"Cam 3 (3)"}
+											</button>
+										</div>
+										<div className="flex justify-center gap-2">
+											<button className="btn" onClick={downloadImage}>
+												{"Snapshot"}
+											</button>
+											<Button
+												color={isRecording ? "error" : ""}
+												onClick={() => {
+													if (!isRecording) {
+														setIsRecording(true);
+														mediaRecorder.start();
+													} else {
+														setIsRecording(false);
+														mediaRecorder.stop();
+													}
+												}}
+											>
+												{!isRecording && "Record"}
+												{isRecording && "Stop"}
+											</Button>
+
+										</div>
+									</div>
+								</div>
+								<div style={{ position: 'relative', width: '1500px', height: '580px', overflow: "hidden" }}>
+									{/* iframe for webpage */}
+									<iframe
+										className={`object-contain h-[100%]`}
+										// ref={iframeRef}
+										style={{ position: 'relative', top: "-43px", left: 0, width: '100%', height: '100%', border: 'none' }}
+										src="http://192.168.88.246:8090/?ds=rosbridge-websocket&ds.url=ws%3A%2F%2F192.168.88.2%3A8080"
+										// src="http://192.168.0.141:8090/?ds=rosbridge-websocket&ds.url=ws%3A%2F%2Flocalhost%3A9090&layoutId=cf454c6f-4944-4c11-b20d-629e1e3788c7"
+										title="Web Page"
+									></iframe>
+								</div>
+							</div>
 						</div>
-						<div>
-							<h2 style={{ color: 'white', fontWeight: 'bold' }}>AREA</h2>
-							<Odometer value={areaValue} format="(,ddd).dd" duration="500" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+						<div className="flex flex-col w-full h-[50%] invisible md:visible">
+							<div className="flex justify-left gap-10">
+								<div ref={chartContainerRef} style={{ width: '1350px', overflowX: 'auto', marginBottom: "15px", marginLeft: "10px" }}>
+									{realtimeData.length ?
+										(<>
+											<LineChart width={chartWidth} height={320} data={realtimeData}>
+												<CartesianGrid strokeDasharray="3 3" />
+												<XAxis dataKey="x" interval={1} />
+												<YAxis domain={[0.5225, parseFloat(inputDiameter) + parseFloat(inputTol) / 100 * parseFloat(inputDiameter)]} />
+												<Tooltip />
+												<Legend />
+												<Line type="monotone" dataKey="diameter" stroke="#00FFFF" />
+												<Line type="monotone" dataKey="expected" stroke="#FF00FF" />
+											</LineChart>
+										</>)
+										:
+										(<>
+											<ScatterChart width={1350} height={320}>
+												<CartesianGrid />
+												<XAxis type="number" dataKey="x" name="X" />
+												<YAxis type="number" dataKey="y" name="Y" />
+												<ZAxis type="number" range={[100]} />
+												<Tooltip cursor={{ strokeDasharray: '3 3' }} />
+												{/* A2 */}
+												<Scatter data={data} fill="red" line shape="diamond" />
+												<Scatter data={data9} fill="red" line shape="diamond" />
+												<Scatter data={data10} fill="red" line shape="diamond" />
+												{/* T */}
+												<Scatter data={data1} fill="#40E0D0" line shape="diamond" />
+												<Scatter data={data2} fill="#40E0D0" line shape="diamond" />
+												{/* E */}
+												<Scatter data={data3} fill="#DFFF00" line shape="diamond" />
+												<Scatter data={data4} fill="#DFFF00" line shape="diamond" />
+												<Scatter data={data5} fill="#DFFF00" line shape="diamond" />
+												{/* C */}
+												<Scatter data={data6} fill="#FF7F50" line shape="diamond" />
+												{/* H */}
+												<Scatter data={data7} fill="Fuchsia" line shape="diamond" />
+												<Scatter data={data8} fill="Fuchsia" line shape="diamond" />
+											</ScatterChart>
+										</>)}
+								</div>
+								<div className="flex" style={{ marginTop: "3px" }}>
+									<div>
+										<div className="flex gap-2">
+											<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "22px" }}>ODOMETER</h2>
+											<button
+												className="btn tooltip"
+												style={{ width: "30px", height: "30px", padding: "1px", marginTop: "-6px", marginLeft: "8px", backgroundColor: "white", transform: "rotate(90deg)" }}
+												data-tip="Reset"
+												onClick={() => {
+													odometerResetPub.current.publish({});
+												}}
+											>
+												<BiReset color="black" size={25}></BiReset>
+											</button>
+										</div>
+										<Odometer value={odometerValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+										<div className="mt-10">
+											<div className="flex gap-2">
+												<h2 style={{ color: 'white', fontWeight: 'bold', marginTop: '7px', fontSize: "22px" }}>FORWARD(M)</h2>
+												<button
+													className="btn tooltip"
+													style={{ width: "30px", height: "30px", padding: "1px", margin: "0px", marginLeft: "8px", backgroundColor: "white", transform: "rotate(90deg)" }}
+													data-tip="Reset"
+													onClick={() => {
+														resetOdomPub.current.publish({});
+													}}
+												>
+													<BiReset color="black" size={25}></BiReset>
+												</button>
+											</div>
+											<Odometer value={airSpeedValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+										</div>
+										{/* <div>
+											<h2 style={{ color: 'white', fontWeight: 'bold', marginTop: '7px' }}>AREA</h2>
+											<Odometer value={areaValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+										</div>
+										<div>
+											<h2 style={{ color: 'white', fontWeight: 'bold', marginTop: '7px' }}>FLOW RATE</h2>
+											<Odometer value={flowRateValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+										</div> */}
+									</div>
+								</div>
+
+								<div className="flex" >
+									<div style={{ marginLeft: "5px" }}>
+										<button
+											className={`btn tooltip tooltip-left ${autoStart ? 'animated' : ''} ${autoStart ? 'active' : ''}`}
+											style={{ width: "120px", height: "120px", marginLeft: "55px", marginTop: "30px", backgroundColor: autoStart ? 'aquamarine' : 'crimson' }}
+											data-tip="Press To Start/Stop"
+											onClick={handleAuto}
+										>
+											<BsRocketTakeoff color="black" size={90}></BsRocketTakeoff>
+										</button>
+										<div>
+											<div className="flex justify-center gap-2">
+												<input
+													ref={inputValueRef}
+													type="text"
+													style={{ height: "40px", width: "200px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
+													placeholder="Meter To Travel"
+													value={inputValue}
+													onChange={handleInputChange}
+												/>
+												<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>m</h2>
+											</div>
+											<div className="flex justify-center gap-2">
+												<input
+													ref={inputDiameterRef}
+													type="text"
+													style={{ height: "40px", width: "130px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
+													placeholder="Diameter(m)"
+													value={inputDiameter}
+													onChange={handleInputDiameterChange}
+												/>
+												<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>±</h2>
+												<input
+													ref={inputTolRef}
+													type="text"
+													style={{ height: "40px", width: "60px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
+													placeholder="Tol"
+													value={inputTol}
+													onChange={handleInputTolChange}
+												/>
+												<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>%</h2>
+											</div>
+										</div>
+									</div>
+								</div>
+
+							</div>
 						</div>
-						<div>
-							<h2 style={{ color: 'white', fontWeight: 'bold' }}>FLOW RATE</h2>
-							<Odometer value={flowRateValue} format="(,ddd).dd" duration="500" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
-						</div>
-					</div>
-				</div>
+					</>
+				)}
+
 
 				{showJoystick && (
 					<>
