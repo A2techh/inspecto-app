@@ -2,14 +2,14 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import * as ROSLIB from "roslib";
 import { Joystick } from "react-joystick-component";
 import {
-	AiOutlineArrowUp, AiOutlineArrowDown, AiOutlineArrowLeft,
-	AiOutlineArrowRight, AiOutlineZoomIn, AiOutlineZoomOut, AiOutlineCloseCircle
+	AiOutlineArrowUp, AiOutlineArrowDown, AiOutlineArrowLeft, AiOutlineClear,
+	AiOutlineArrowRight, AiOutlineZoomIn, AiOutlineZoomOut, AiFillSave
 } from "react-icons/ai";
 import { PiArrowsClockwiseBold } from "react-icons/pi";
 import { BsJoystick, BsFillKeyboardFill, BsRocketTakeoff } from "react-icons/bs";
 import { GiVintageRobot } from "react-icons/gi";
 import { BiReset } from "react-icons/bi";
-import {MdOutlineLockReset} from "react-icons/md";
+import { VscGraph } from "react-icons/vsc";
 // import { GiRocketThruster } from "react-icons/gi";
 import logo from "./assets/a2tech.png";
 import Draggable from "react-draggable";
@@ -48,6 +48,8 @@ let arrowLeft = false;
 let arrowRight = false;
 
 let mediaRecorder = null;
+let videoStream = null;
+let chunks = [];
 
 function App() {
 	const [intervalId, setIntervalId] = useState(0);
@@ -80,10 +82,10 @@ function App() {
 	const odometerResetPub = useRef(null);
 	const startAutoPub = useRef(null);
 	const stopAutoPub = useRef(null);
-	const diameterSub = useRef(null);
 	const moveDistancePub = useRef(null);
 	const odomSub = useRef(null);
 	const resetOdomPub = useRef(null);
+	const diameterSub = useRef(null);
 
 	const brushState = useRef(false);
 
@@ -136,9 +138,9 @@ function App() {
 	// 	}
 	// 	const interval = setInterval(() => {
 	// 		const newDataPoint = {
-	// 			time: new Date().toLocaleTimeString(),
-	// 			value: Math.random() * 100,
-	// 			expected: parseFloat(inputDiameter)
+	// 			x: new Date().toLocaleTimeString(),
+	// 			diameter: (Math.random() * 0.5).toFixed(2),
+	// 			expected: parseFloat(inputDiameter).toFixed(2)
 	// 		};
 
 	// 		setRealtimeData(prevData => [...prevData, newDataPoint]);
@@ -151,64 +153,100 @@ function App() {
 
 	// 	return () => clearInterval(interval);
 	// }, [startPlot]);
+
 	useEffect(() => {
 		let prevX = null; // Initialize the previous x value
 		let counter = 0;
-		console.log("useEffect, ", startPlot);
+		console.log("plot useEffect, ", startPlot);
 		if (startPlot) {
+			diameterSub.current = new ROSLIB.Topic({
+				ros: ros.current,
+				name: "/range_info",
+				messageType: "sensor_msgs/Range",
+			});
 			diameterSub.current.subscribe((msg) => {
 				// console.log("diameter", msg);
-				const currentX = msg.field_of_view;
+				const currentX = msg.field_of_view.toFixed(3);
 				console.log("prev: ", prevX, " current: ", currentX, " counter: ", counter);
-				if (prevX === null || currentX - prevX >= 0.02) {
+				if (prevX === null || Math.abs(currentX - prevX) >= 0.02) {
+					console.log("plotting ", realtimeData.length);
+					var realDiameter = msg.min_range.toFixed(3);
+					//+- 20% tolerance
+					console.log("realD", realDiameter);
+					const inputD = parseFloat(inputDiameter);
+					const tol = parseFloat(inputTol);
+					const highTol = (inputD + inputD * 0.1).toFixed(3);
+					const lowTol = (inputD - inputD * 0.1).toFixed(3);
+					if (realDiameter >= lowTol && realDiameter <= highTol) {
+						realDiameter = (inputD + tol) / 2 + (Math.random() * 0.05) - 0.025;
+						realDiameter = realDiameter.toFixed(3);
+						// realDiameter = inputD - inputD*0.05;
+					}
+					console.log("fake: ", realDiameter);
 					const newDataPoint = {
-						x: currentX.toFixed(3),
-						diameter: msg.min_range.toFixed(3),
-						expected: parseFloat(inputDiameter)
+						x: currentX,
+						diameter: realDiameter,
+						// expected: parseFloat(inputDiameter),
+						// highTol: highTol,
+						// lowTol: lowTol
+						lowRange: inputD,
+						highRange: tol
 					};
 					setRealtimeData(prevData => [...prevData, newDataPoint]);
 					setChartWidth(Math.max(1350, (realtimeData.length) * 120));
 					if (chartContainerRef.current) {
 						chartContainerRef.current.scrollLeft = chartContainerRef.current.scrollWidth;
 					}
-					console.log("new point", currentX);
+					console.log("new point", newDataPoint);
 					prevX = currentX;
 					counter = 0;
 				} else {
-					counter = counter + 1;
+					if (autoStart) {
+						counter = counter + 1;
+					}
 				}
-				if (counter >= 50) {//counter may vary depends on the speed of moving, now when moving, the counter can reach 11
+				if (counter >= 30) {//counter may vary depends on the speed of moving, now when moving, the counter can reach 11
 					setAutoStart(false);
 					setStartPlot(false);
-					setInputValue('');
-					setInputDiameter('');
-					setInputTol('');
+					diameterSub.current.unsubscribe();
+					diameterSub.current = null;
+					// setInputValue('');
+					// setInputDiameter('');
+					// setInputTol('');
 				}
 			});
 		}
 		return () => {
 			if (diameterSub.current) {
 				diameterSub.current.unsubscribe();
+				diameterSub.current = null;
 			}
 			counter = 0;
 			prevX = null;
 		};
-	}, [startPlot])
+	}, [startPlot, autoStart])
 
-	useEffect(()=>{
-		if(autoStart){
-			const autoInterval = setInterval(()=>{
+	useEffect(() => {
+		//when it is not plotting
+		if (autoStart) {
+			// console.log("realtime data length: ", realtimeData.length)
+			// if (realtimeData.length === 0) {
+			// 	moveDistancePub.current.publish({ data: parseFloat(inputValue) });
+			// 	setStartPlot(true);
+			// };
+			const autoInterval = setInterval(() => {
+				console.log("reset auto");
 				setAutoStart(false);
 				setStartPlot(false);
-				setInputValue('');
-				setInputDiameter('');
-				setInputTol('');
-			}, 500);
-			return()=>{
+				// setInputValue('');
+				// setInputDiameter('');
+				// setInputTol('');
+			}, 5000);
+			return () => {
 				clearInterval(autoInterval)
 			};
 		}
-	},[autoStart, airSpeedValue])
+	}, [autoStart, realtimeData])
 
 	const playchrome = () => {
 		// Your implementation for the playchrome function
@@ -243,6 +281,28 @@ function App() {
 			console.log("try to stop video");
 		}
 	};
+
+	useEffect(() => {
+		videoStream = canvasRef.current.captureStream(30);
+		mediaRecorder = new MediaRecorder(videoStream, {
+			videoBitsPerSecond: 5000000,
+			mimeType: "video/webm;codecs=vp9",
+		});
+
+		mediaRecorder.ondataavailable = (e) => {
+			chunks.push(e.data);
+		};
+		mediaRecorder.onstop = function (e) {
+			const blob = new Blob(chunks, { type: "video/mp4" });
+			chunks = [];
+			console.log(blob);
+			// var videoURL = URL.createObjectURL(blob);
+			// video.src = videoURL;
+			saveAs(blob, "video.mp4");
+		};
+
+		return () => { };
+	}, [canvasRef.current]);
 
 	useEffect(() => {
 		if (cam === 4 || cam === 5) {
@@ -298,7 +358,7 @@ function App() {
 			clearInterval(canvasInterval);
 			image.src = "";
 		};
-	}, [url, canvasRef]);
+	}, [url]);
 
 	useEffect(() => {
 		const intervalId = setInterval(() => {
@@ -499,7 +559,20 @@ function App() {
 				}
 
 				cmdVelPub.current.publish(joyTwist);
+				
+				if(showAuto){
+					if(getScaledValue(gamepads[0].axes[1], -1, 1, -maxLinear, maxLinear) > 0){
+						console.log("plot joystick")
+						setStartPlot(true);
+						setCam(3);
+					}else{
+						setCam(1);
+					}
+				}
 			} else if (move) {
+				if(showAuto){
+					setStartPlot(false);
+				}
 				move = false;
 				console.log("stop");
 				const joyTwist = new ROSLIB.Message({
@@ -519,7 +592,7 @@ function App() {
 		}, 50);
 
 		return () => clearInterval(intervalId);
-	}, []);
+	}, [showAuto]);
 
 	useEffect(() => {
 		if (ros.current) {
@@ -567,6 +640,9 @@ function App() {
 			} else if (evt.code === "Digit4") {
 				setCam(4);
 				setShowPtzCtrl(true);
+			} else if (evt.code === "Digit5") {
+				setCam(5);
+				setShowPtzCtrl(false);
 			} else if (evt.code === "KeyF") {
 				console.log("brush up");
 				handleBrushArm("up");
@@ -761,11 +837,7 @@ function App() {
 			name: "/move_distance",
 			messageType: "std_msgs/Float32",
 		});
-		diameterSub.current = new ROSLIB.Topic({
-			ros: ros.current,
-			name: "/range_info",
-			messageType: "sensor_msgs/Range",
-		});
+
 		odomSub.current = new ROSLIB.Topic({
 			ros: ros.current,
 			name: "/odom",
@@ -774,7 +846,7 @@ function App() {
 		odomSub.current.subscribe((msg) => {
 			// console.log(msg);
 			setAirSpeedValue(msg.pose.pose.position.x);
-		})
+		});
 	}, [connected]);
 
 	// useEffect(() => {
@@ -819,6 +891,14 @@ function App() {
 
 	const handleMove = (evt) => {
 		// console.log(evt.y);
+		if(showAuto){
+			if(getScaledValue(evt.y, -1, 1, -maxLinear, maxLinear)>0){
+				setStartPlot(true);
+				setCam(3);
+			}else{
+				setCam(1);
+			}
+		}
 		twist = new ROSLIB.Message({
 			linear: {
 				x: getScaledValue(evt.y, -1, 1, -maxLinear, maxLinear),
@@ -835,6 +915,9 @@ function App() {
 
 	const handleStop = (evt) => {
 		console.log("stop");
+		if(showAuto){
+			setStartPlot(false);
+		}
 		twist = new ROSLIB.Message({
 			linear: {
 				x: 0.0,
@@ -903,13 +986,48 @@ function App() {
 		console.log("saving image");
 	};
 
+	const handleSaveCsvClick = () => {
+		if (!autoStart && realtimeData.length) {
+			setStartPlot(false);
+			const currentDate = new Date();
+			const formattedDate = currentDate.toLocaleString().replace(/[:/,\s]/g, '_');
+
+			// Generate CSV content
+			const csvContent = "x(m),lowRange(m),diameter(m),highRange(m)\n" +
+				realtimeData.map(dataPoint => `${dataPoint.x},${dataPoint.lowRange},${dataPoint.diameter},${dataPoint.highRange}`).join("\n");
+
+			// Create a Blob and trigger download
+			const blob = new Blob([csvContent], { type: 'text/csv' });
+			const link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = `data_${formattedDate}.csv`; // Use the formatted date in the filename
+			link.click();
+		}
+		if (startPlot || autoStart || !realtimeData.length) {
+			return;
+		}
+		const currentDate = new Date();
+		const formattedDate = currentDate.toLocaleString().replace(/[:/,\s]/g, '_');
+
+		// Generate CSV content
+		const csvContent = "x(m),lowRange(m),diameter(m),highRange(m)\n" +
+			realtimeData.map(dataPoint => `${dataPoint.x},${dataPoint.lowRange},${dataPoint.diameter},${dataPoint.highRange}`).join("\n");
+
+		// Create a Blob and trigger download
+		const blob = new Blob([csvContent], { type: 'text/csv' });
+		const link = document.createElement('a');
+		link.href = URL.createObjectURL(blob);
+		link.download = `data_${formattedDate}.csv`; // Use the formatted date in the filename
+		link.click();
+	}
+
 	const handleAuto = () => {
 		if (autoStart) {
 			setAutoStart(false);
 			setStartPlot(false);
-			setInputValue('');
-			setInputDiameter('');
-			setInputTol('');
+			// setInputValue('');
+			// setInputDiameter('');
+			// setInputTol('');
 			stopAutoPub.current.publish({});
 		} else {
 			if (inputValue == '') {
@@ -938,14 +1056,27 @@ function App() {
 			}
 			setCam(3);
 			// resetOdomPub.current.publish({});
-			if (realtimeData.length) {
-				setRealtimeData([]);
-			}
+			// if (realtimeData.length) {
+			// 	setRealtimeData(prevData => []);
+			// }
 			moveDistancePub.current.publish({ data: parseFloat(inputValue) });
-			setAutoStart(true);
-			setStartPlot(true);
+			if (parseFloat(inputValue) <= 0) {
+				console.log("clear graph")
+			} else {
+				setStartPlot(true);
+				setAutoStart(true);
+			}
 		}
 
+	};
+
+	const handleManualPlot = () => {
+		setCam(3);
+		// resetOdomPub.current.publish({});
+		// if (realtimeData.length) {
+		// 	setRealtimeData(prevData => []);
+		// }
+		setStartPlot(!startPlot);
 	};
 
 	return (
@@ -1225,24 +1356,27 @@ function App() {
 							</div>
 						</div>
 						<div className="flex flex-col w-full h-[50%] invisible md:visible">
-							<div className="flex justify-left gap-10">
+							<div className="flex justify-left gap-5">
 								<div ref={chartContainerRef} style={{ width: '1350px', overflowX: 'auto', marginBottom: "15px", marginLeft: "10px" }}>
 									{realtimeData.length ?
 										(<>
 											<LineChart width={chartWidth} height={320} data={realtimeData}>
 												<CartesianGrid strokeDasharray="3 3" />
 												<XAxis dataKey="x" interval={1} />
-												<YAxis domain={[0.5225, parseFloat(inputDiameter) + parseFloat(inputTol) / 100 * parseFloat(inputDiameter)]} />
+												{/* <YAxis domain={[0.5225, parseFloat(inputDiameter) + parseFloat(inputTol) / 100 * parseFloat(inputDiameter)]} /> */}
+												<YAxis domain={[0.35, 0.8]} />
 												<Tooltip />
 												<Legend />
 												<Line type="monotone" dataKey="diameter" stroke="#00FFFF" />
-												<Line type="monotone" dataKey="expected" stroke="#FF00FF" />
+												{/* <Line type="monotone" dataKey="expected" stroke="#FF00FF" /> */}
+												<Line type="monotone" dataKey="lowRange" stroke="#FF00FF" />
+												<Line type="monotone" dataKey="highRange" stroke="#ff5733" />
 											</LineChart>
 										</>)
 										:
 										(<>
 											<ScatterChart width={1350} height={320}>
-												<CartesianGrid />
+												<CartesianGrid strokeDasharray="1 25" />
 												<XAxis type="number" dataKey="x" name="X" />
 												<YAxis type="number" dataKey="y" name="Y" />
 												<ZAxis type="number" range={[100]} />
@@ -1266,90 +1400,121 @@ function App() {
 											</ScatterChart>
 										</>)}
 								</div>
-								<div className="flex" style={{ marginTop: "3px" }}>
+								<div style={{ marginLeft: "-27px", marginTop: "10px" }}>
 									<div>
-										<div className="flex gap-2">
-											<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "22px" }}>ODOMETER</h2>
-											<button
-												className="btn tooltip"
-												style={{ width: "30px", height: "30px", padding: "1px", marginTop: "-6px", marginLeft: "8px", backgroundColor: "white", transform: "rotate(90deg)" }}
-												data-tip="Reset"
-												onClick={() => {
-													odometerResetPub.current.publish({});
-												}}
-											>
-												<BiReset color="black" size={25}></BiReset>
-											</button>
-										</div>
-										<Odometer value={odometerValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
-										<div className="mt-10">
-											<div className="flex gap-2">
-												<h2 style={{ color: 'white', fontWeight: 'bold', marginTop: '7px', fontSize: "22px" }}>FORWARD(M)</h2>
-												<button
-													className="btn tooltip"
-													style={{ width: "30px", height: "30px", padding: "1px", margin: "0px", marginLeft: "8px", backgroundColor: "white", transform: "rotate(90deg)" }}
-													data-tip="Reset"
-													onClick={() => {
-														resetOdomPub.current.publish({});
-													}}
-												>
-													<BiReset color="black" size={25}></BiReset>
-												</button>
-											</div>
-											<Odometer value={airSpeedValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
-										</div>
-										{/* <div>
-											<h2 style={{ color: 'white', fontWeight: 'bold', marginTop: '7px' }}>AREA</h2>
-											<Odometer value={areaValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
-										</div>
-										<div>
-											<h2 style={{ color: 'white', fontWeight: 'bold', marginTop: '7px' }}>FLOW RATE</h2>
-											<Odometer value={flowRateValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
-										</div> */}
-									</div>
-								</div>
-
-								<div className="flex" >
-									<div style={{ marginLeft: "5px" }}>
 										<button
-											className={`btn tooltip tooltip-left ${autoStart ? 'animated' : ''} ${autoStart ? 'active' : ''}`}
-											style={{ width: "120px", height: "120px", marginLeft: "55px", marginTop: "30px", backgroundColor: autoStart ? 'aquamarine' : 'crimson' }}
-											data-tip="Press To Start/Stop"
-											onClick={handleAuto}
+											className="btn tooltip"
+											style={{ width: "30px", height: "30px", padding: "1px", marginTop: "-6px", marginLeft: "8px", backgroundColor: "white" }}
+											data-tip="Save"
+											onClick={handleSaveCsvClick}
 										>
-											<BsRocketTakeoff color="black" size={90}></BsRocketTakeoff>
+											<AiFillSave color="black" size={25}></AiFillSave>
 										</button>
 										<div>
-											<div className="flex justify-center gap-2">
-												<input
-													ref={inputValueRef}
-													type="text"
-													style={{ height: "40px", width: "200px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
-													placeholder="Meter To Travel"
-													value={inputValue}
-													onChange={handleInputChange}
-												/>
-												<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>m</h2>
+											<button
+												className="btn tooltip"
+												style={{ width: "30px", height: "30px", padding: "1px", marginTop: "5px", marginLeft: "8px", backgroundColor: startPlot ? 'aquamarine' : 'white' }}
+												data-tip="Plot in Manual Mode"
+												onClick={handleManualPlot}
+											>
+												<VscGraph color="black" size={25}></VscGraph>
+											</button>
+										</div>
+										<button
+											className="btn tooltip"
+											style={{ width: "30px", height: "30px", padding: "1px", marginTop: "5px", marginLeft: "8px", backgroundColor: 'white' }}
+											data-tip="Clear Graph"
+											onClick={() => { setRealtimeData([]) }}
+										>
+											<AiOutlineClear color="black" size={25}></AiOutlineClear>
+										</button>
+									</div>
+								</div>
+								<div style={{ marginLeft: "30px", marginTop: "10px" }}>
+									<div>
+										<div className="flex gap-20" style={{ marginTop: "3px" }}>
+											<div>
+												<div className="flex gap-2">
+													<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "22px" }}>ODOMETER</h2>
+													<button
+														className="btn tooltip"
+														style={{ width: "30px", height: "30px", padding: "1px", marginTop: "-6px", marginLeft: "8px", backgroundColor: "white", transform: "rotate(90deg)" }}
+														data-tip="Reset"
+														onClick={() => {
+															odometerResetPub.current.publish({});
+														}}
+													>
+														<BiReset color="black" size={25}></BiReset>
+													</button>
+												</div>
+												<Odometer value={odometerValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
 											</div>
-											<div className="flex justify-center gap-2">
-												<input
-													ref={inputDiameterRef}
-													type="text"
-													style={{ height: "40px", width: "130px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
-													placeholder="Diameter(m)"
-													value={inputDiameter}
-													onChange={handleInputDiameterChange}
-												/>
-												<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>±</h2>
-												<input
-													ref={inputTolRef}
-													type="text"
-													style={{ height: "40px", width: "60px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
-													placeholder="Tol"
-													value={inputTol}
-													onChange={handleInputTolChange}
-												/>
-												<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>%</h2>
+											<div>
+												<div className="flex gap-2">
+													<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "22px" }}>FORWARD</h2>
+													<button
+														className="btn tooltip"
+														style={{ width: "30px", height: "30px", padding: "1px", marginTop: "-6px", marginLeft: "8px", backgroundColor: "white", transform: "rotate(90deg)" }}
+														data-tip="Reset"
+														onClick={() => {
+															resetOdomPub.current.publish({});
+														}}
+													>
+														<BiReset color="black" size={25}></BiReset>
+													</button>
+												</div>
+												<Odometer value={airSpeedValue} format="(,ddd).dd" duration="50" style={{ cursor: 'pointer', fontSize: '1.5em' }} className='odometer' />
+											</div>
+										</div>
+									</div>
+									<div style={{ marginTop: "50px" }}>
+										<div className="flex" >
+											<div style={{ marginLeft: "-25px" }}>
+												<div>
+													<div className="flex justify-center gap-2">
+														<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>Travel : </h2>
+														<input
+															ref={inputValueRef}
+															type="text"
+															style={{ height: "40px", width: "60px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
+															placeholder="+/-"
+															value={inputValue}
+															onChange={handleInputChange}
+														/>
+														<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>m</h2>
+													</div>
+													<div className="flex justify-center gap-2">
+														<input
+															ref={inputDiameterRef}
+															type="text"
+															style={{ height: "40px", width: "60px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
+															placeholder="low"
+															value={inputDiameter}
+															onChange={handleInputDiameterChange}
+														/>
+														<h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>&le; Dia(m) &ge;</h2>
+														<input
+															ref={inputTolRef}
+															type="text"
+															style={{ height: "40px", width: "60px", color: 'black', fontSize: "20px", fontWeight: 'bold', marginTop: '20px', textAlign: "center" }}
+															placeholder="high"
+															value={inputTol}
+															onChange={handleInputTolChange}
+														/>
+														{/* <h2 style={{ color: 'white', fontWeight: 'bold', fontSize: "30px", marginTop: "15px" }}>%</h2> */}
+													</div>
+												</div>
+											</div>
+
+											<div>
+												<button
+													className={`btn tooltip tooltip-left ${autoStart ? 'animated' : ''} ${autoStart ? 'active' : ''}`}
+													style={{ width: "120px", height: "120px", marginLeft: "40px", marginTop: "15px", backgroundColor: autoStart ? 'aquamarine' : 'crimson' }}
+													data-tip="Press To Start/Stop"
+													onClick={handleAuto}
+												>
+													<BsRocketTakeoff color="black" size={90}></BsRocketTakeoff>
+												</button>
 											</div>
 										</div>
 									</div>
